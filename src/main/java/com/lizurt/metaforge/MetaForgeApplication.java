@@ -1,4 +1,4 @@
-package com.example.metaforge;
+package com.lizurt.metaforge;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
