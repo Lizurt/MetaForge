@@ -1,58 +1,182 @@
 package com.lizurt.metaforge;
 
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.junit.jupiter.Container;
+
+import java.sql.*;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.Random;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SpringBootTest
 public class PostgreSQLTests {
+
+    @Value("${spring.datasource.url}")
+    private String dbUrl;
+
+    @Value("${spring.datasource.username}")
+    private String dbUsername;
+
+    @Value("${spring.datasource.password}")
+    private String dbPassword;
+
     @Value("${metaforge.test.database.users.amount}")
     private int usersAmount;
 
-    @Container
-    public static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:15.3")
-            .withDatabaseName("testdb")
-            .withUsername("postgres")
-            .withPassword("password");
+    @Value("${metaforge.test.database.libraries.amount}")
+    private int librariesAmount;
 
-    @DynamicPropertySource
-    static void setDatasourceProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", postgres::getJdbcUrl);
-        registry.add("spring.datasource.username", postgres::getUsername);
-        registry.add("spring.datasource.password", postgres::getPassword);
-    }
+    @Value("${metaforge.test.database.visits.amount}")
+    private int visitsAmount;
 
-    @Autowired
-    private JdbcTemplate jdbcTemplate;
-
-    @BeforeEach
-    public void setupDatabase() {
-        jdbcTemplate.execute("""
-            CREATE TABLE users (
-                id SERIAL PRIMARY KEY,
-                username VARCHAR(64) NOT NULL UNIQUE,
-                email VARCHAR(100) NOT NULL UNIQUE,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        """);
-
-        for (int i = 0; i < usersAmount; i++) {
-            jdbcTemplate.execute("INSERT INTO users (username, email) VALUES ('john_doe', 'john@example.com')");
-        }
-    }
+    @Value("${metaforge.test.random.seed}")
+    private int randomSeed;
 
     @Test
-    public void testDatabase() {
-        int userCount = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM users", Integer.class);
-        assertEquals(1, userCount);
+    public void populateDatabaseAndTestConstraints() throws Exception {
+        Random random = new Random(randomSeed);
+
+        try (Connection connection = DriverManager.getConnection(dbUrl, dbUsername, dbPassword)) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("DROP TABLE IF EXISTS visits");
+                statement.execute("DROP TABLE IF EXISTS libraries");
+                statement.execute("DROP TABLE IF EXISTS users");
+
+                statement.execute("CREATE TABLE users (" +
+                        "user_id SERIAL PRIMARY KEY, " +
+                        "age INT, " +
+                        "salary FLOAT, " +
+                        "name TEXT NOT NULL, " +
+                        "surname TEXT NOT NULL, " +
+                        "patronymic TEXT, " +
+                        "login TEXT UNIQUE " +
+                        ")");
+
+                statement.execute("CREATE TABLE libraries (" +
+                        "library_id SERIAL PRIMARY KEY, " +
+                        "location TEXT NOT NULL " +
+                        ")");
+
+                statement.execute("CREATE TABLE visits (" +
+                        "visit_id SERIAL PRIMARY KEY, " +
+                        "user_id INT, " +
+                        "library_id INT, " +
+                        "visit_date TIMESTAMP, " +
+                        "UNIQUE (user_id, library_id, visit_date), " +
+                        "FOREIGN KEY (user_id) REFERENCES users(user_id), " +
+                        "FOREIGN KEY (library_id) REFERENCES libraries(library_id) " +
+                        ")");
+            }
+
+            try (PreparedStatement usersStatement =
+                         connection.prepareStatement(
+                                 "INSERT INTO users (age, salary, name, surname, patronymic, login) " +
+                                         "VALUES (?, ?, ?, ?, ?, ?)")) {
+                for (int i = 0; i < usersAmount; i++) {
+                    usersStatement.setInt(1, random.nextInt(100));
+                    usersStatement.setFloat(2, random.nextFloat() * 100000);
+                    usersStatement.setString(3, "John" + i);
+                    usersStatement.setString(4, "Doe" + i);
+                    usersStatement.setString(5, "Patronymic" + i);
+                    usersStatement.setString(6, "johndoe" + i);
+                    usersStatement.addBatch();
+                }
+                usersStatement.executeBatch();
+            }
+
+            try (PreparedStatement librariesStatement =
+                         connection.prepareStatement(
+                                 "INSERT INTO libraries (location) VALUES (?)")) {
+                for (int i = 0; i < librariesAmount; i++) {
+                    librariesStatement.setString(1, "Revolutsii street, " + i);
+                    librariesStatement.addBatch();
+                }
+                librariesStatement.executeBatch();
+            }
+
+            try (PreparedStatement visitsStatement =
+                         connection.prepareStatement(
+                                 "INSERT INTO visits (user_id, library_id, visit_date) VALUES (?, ?, ?)")) {
+                for (int i = 0; i < visitsAmount; i++) {
+                    visitsStatement.setInt(1, random.nextInt(usersAmount) + 1);
+                    visitsStatement.setInt(2, random.nextInt(librariesAmount) + 1);
+                    visitsStatement.setTimestamp(3, Timestamp.from(Instant.now().plus(i, ChronoUnit.DAYS)));
+                    visitsStatement.addBatch();
+                }
+                visitsStatement.executeBatch();
+            }
+
+            try (Statement statement = connection.createStatement()) {
+                try (
+                        ResultSet rs = statement.executeQuery(
+                        "SELECT column_name, constraint_type " +
+                                "FROM information_schema.table_constraints tc " +
+                                "JOIN information_schema.constraint_column_usage ccu " +
+                                "ON tc.constraint_name = ccu.constraint_name " +
+                                "WHERE tc.table_name = 'users'")
+                ) {
+                    while (rs.next()) {
+                        String columnName = rs.getString("column_name");
+                        String constraintType = rs.getString("constraint_type");
+                        switch (columnName) {
+                            case "user_id":
+                                assertEquals("PRIMARY KEY", constraintType);
+                                break;
+                            case "name", "surname":
+                                assertEquals("NOT NULL", constraintType);
+                                break;
+                            case "login":
+                                assertEquals("UNIQUE", constraintType);
+                                break;
+                        }
+                    }
+                }
+
+                try (ResultSet rs = statement.executeQuery(
+                        "SELECT column_name, constraint_type " +
+                                "FROM information_schema.table_constraints tc " +
+                                "JOIN information_schema.constraint_column_usage ccu " +
+                                "ON tc.constraint_name = ccu.constraint_name " +
+                                "WHERE tc.table_name = 'visits'")) {
+                    while (rs.next()) {
+                        String columnName = rs.getString("column_name");
+                        String constraintType = rs.getString("constraint_type");
+                        switch (columnName) {
+                            case "user_id, library_id":
+                                assertEquals("FOREIGN KEY", constraintType);
+                                break;
+                            case "visit_id":
+                                assertEquals("PRIMARY KEY", constraintType);
+                                break;
+                        }
+                    }
+                }
+
+                try (ResultSet rs = statement.executeQuery(
+                        "SELECT column_name, constraint_type " +
+                                "FROM information_schema.table_constraints tc " +
+                                "JOIN information_schema.constraint_column_usage ccu " +
+                                "ON tc.constraint_name = ccu.constraint_name " +
+                                "WHERE tc.table_name = 'libraries'")) {
+                    while (rs.next()) {
+                        String columnName = rs.getString("column_name");
+                        String constraintType = rs.getString("constraint_type");
+                        switch (columnName) {
+                            case "library_id":
+                                assertEquals("PRIMARY KEY", constraintType);
+                                break;
+                            case "location":
+                                assertEquals("NOT NULL", constraintType);
+                                break;
+                        }
+                    }
+
+                }
+            }
+        }
     }
 }
