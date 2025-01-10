@@ -1,6 +1,9 @@
 package com.lizurt.metaforge;
 
+import com.lizurt.metaforge.service.MetaForgeService;
+import lombok.RequiredArgsConstructor;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
 
@@ -13,6 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SpringBootTest
+@RequiredArgsConstructor(onConstructor = @__(@Autowired))
 public class PostgreSQLTests {
 
     @Value("${spring.datasource.url}")
@@ -36,8 +40,12 @@ public class PostgreSQLTests {
     @Value("${metaforge.test.random.seed}")
     private int randomSeed;
 
+    private final MetaForgeService metaForgeService;
+
     @Test
     public void populateDatabaseAndTestConstraints() throws Exception {
+        metaForgeService.fixDatabase(dbUrl, dbUsername, dbPassword);
+
         Random random = new Random(randomSeed);
 
         try (Connection connection = DriverManager.getConnection(dbUrl, dbUsername, dbPassword)) {
@@ -111,14 +119,15 @@ public class PostgreSQLTests {
             }
 
             try (Statement statement = connection.createStatement()) {
-                try (
-                        ResultSet rs = statement.executeQuery(
-                        "SELECT column_name, constraint_type " +
-                                "FROM information_schema.table_constraints tc " +
-                                "JOIN information_schema.constraint_column_usage ccu " +
-                                "ON tc.constraint_name = ccu.constraint_name " +
-                                "WHERE tc.table_name = 'users'")
-                ) {
+                try (ResultSet rs = statement.executeQuery(
+                        """
+                                SELECT column_name, constraint_type \
+                                FROM information_schema.table_constraints tc \
+                                JOIN information_schema.constraint_column_usage ccu \
+                                ON tc.constraint_name = ccu.constraint_name \
+                                WHERE tc.table_name = 'users'
+                                """
+                )) {
                     while (rs.next()) {
                         String columnName = rs.getString("column_name");
                         String constraintType = rs.getString("constraint_type");
@@ -137,11 +146,14 @@ public class PostgreSQLTests {
                 }
 
                 try (ResultSet rs = statement.executeQuery(
-                        "SELECT column_name, constraint_type " +
-                                "FROM information_schema.table_constraints tc " +
-                                "JOIN information_schema.constraint_column_usage ccu " +
-                                "ON tc.constraint_name = ccu.constraint_name " +
-                                "WHERE tc.table_name = 'visits'")) {
+                        """
+                                SELECT column_name, constraint_type \
+                                FROM information_schema.table_constraints tc \
+                                JOIN information_schema.constraint_column_usage ccu \
+                                ON tc.constraint_name = ccu.constraint_name \
+                                WHERE tc.table_name = 'visits'
+                                """
+                )) {
                     while (rs.next()) {
                         String columnName = rs.getString("column_name");
                         String constraintType = rs.getString("constraint_type");
@@ -156,12 +168,32 @@ public class PostgreSQLTests {
                     }
                 }
 
+                try (ResultSet resultSet = statement.executeQuery(
+                        """
+                                SELECT conname AS constraint_name \
+                                FROM pg_constraint \
+                                WHERE conrelid = 'visits'::regclass \
+                                  AND contype = 'u' \
+                                  AND conkey @> ARRAY[ \
+                                      (SELECT attnum FROM pg_attribute WHERE attrelid = 'visits'::regclass AND attname = 'user_id'), \
+                                      (SELECT attnum FROM pg_attribute WHERE attrelid = 'visits'::regclass AND attname = 'library_id'), \
+                                      (SELECT attnum FROM pg_attribute WHERE attrelid = 'visits'::regclass AND attname = 'visit_date') \
+                                  ];
+                                """
+                )) {
+                    assertTrue(resultSet.next());
+                }
+
+
                 try (ResultSet rs = statement.executeQuery(
-                        "SELECT column_name, constraint_type " +
-                                "FROM information_schema.table_constraints tc " +
-                                "JOIN information_schema.constraint_column_usage ccu " +
-                                "ON tc.constraint_name = ccu.constraint_name " +
-                                "WHERE tc.table_name = 'libraries'")) {
+                        """
+                                SELECT column_name, constraint_type \
+                                FROM information_schema.table_constraints tc \
+                                JOIN information_schema.constraint_column_usage ccu \
+                                ON tc.constraint_name = ccu.constraint_name \
+                                WHERE tc.table_name = 'libraries'
+                                """
+                )) {
                     while (rs.next()) {
                         String columnName = rs.getString("column_name");
                         String constraintType = rs.getString("constraint_type");
@@ -174,7 +206,6 @@ public class PostgreSQLTests {
                                 break;
                         }
                     }
-
                 }
             }
         }
