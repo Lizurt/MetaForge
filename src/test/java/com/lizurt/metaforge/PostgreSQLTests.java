@@ -2,6 +2,7 @@ package com.lizurt.metaforge;
 
 import com.lizurt.metaforge.service.MetaForgeService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -16,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SpringBootTest
+@Slf4j
 @RequiredArgsConstructor(onConstructor = @__(@Autowired))
 public class PostgreSQLTests {
 
@@ -44,8 +46,6 @@ public class PostgreSQLTests {
 
     @Test
     public void populateDatabaseAndTestConstraints() throws Exception {
-        metaForgeService.fixDatabase(dbUrl, dbUsername, dbPassword);
-
         Random random = new Random(randomSeed);
 
         try (Connection connection = DriverManager.getConnection(dbUrl, dbUsername, dbPassword)) {
@@ -118,6 +118,9 @@ public class PostgreSQLTests {
                 visitsStatement.executeBatch();
             }
 
+            metaForgeService.ruinDatabase(dbUrl, dbUsername, dbPassword);
+            metaForgeService.fixDatabase(dbUrl, dbUsername, dbPassword);
+
             try (Statement statement = connection.createStatement()) {
                 try (ResultSet rs = statement.executeQuery(
                         """
@@ -133,13 +136,13 @@ public class PostgreSQLTests {
                         String constraintType = rs.getString("constraint_type");
                         switch (columnName) {
                             case "user_id":
-                                assertEquals("PRIMARY KEY", constraintType);
+                                assertEquals("PRIMARY KEY", constraintType, "users table lost its PRIMARY KEY");
                                 break;
                             case "name", "surname":
-                                assertEquals("NOT NULL", constraintType);
+                                assertEquals("NOT NULL", constraintType, "users table lost its NOT NULL name and surname");
                                 break;
                             case "login":
-                                assertEquals("UNIQUE", constraintType);
+                                assertEquals("UNIQUE", constraintType, "users table lost its ALTERNATIVE KEY (UNIQUE login)");
                                 break;
                         }
                     }
@@ -159,10 +162,10 @@ public class PostgreSQLTests {
                         String constraintType = rs.getString("constraint_type");
                         switch (columnName) {
                             case "user_id, library_id":
-                                assertEquals("FOREIGN KEY", constraintType);
+                                assertEquals("FOREIGN KEY", constraintType, "visits table lost its FOREIGN KEYs");
                                 break;
                             case "visit_id":
-                                assertEquals("PRIMARY KEY", constraintType);
+                                assertEquals("PRIMARY KEY", constraintType, "visits table lost its PRIMARY KEY");
                                 break;
                         }
                     }
@@ -181,7 +184,7 @@ public class PostgreSQLTests {
                                   ];
                                 """
                 )) {
-                    assertTrue(resultSet.next());
+                    assertTrue(resultSet.next(), "visits table lost its alternative key (UNIQUE of user_id, library_id and date)");
                 }
 
 
@@ -199,10 +202,10 @@ public class PostgreSQLTests {
                         String constraintType = rs.getString("constraint_type");
                         switch (columnName) {
                             case "library_id":
-                                assertEquals("PRIMARY KEY", constraintType);
+                                assertEquals("PRIMARY KEY", constraintType, "libraries table lost its PRIMARY KEY");
                                 break;
                             case "location":
-                                assertEquals("NOT NULL", constraintType);
+                                assertEquals("NOT NULL", constraintType, "libraries table lost its NOT NULL location");
                                 break;
                         }
                     }

@@ -19,7 +19,7 @@ repositories {
 
 dependencies {
     implementation 'org.springframework.boot:spring-boot-starter'
-    runtimeOnly 'org.postgresql:postgresql'
+    implementation 'org.postgresql:postgresql'
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 
