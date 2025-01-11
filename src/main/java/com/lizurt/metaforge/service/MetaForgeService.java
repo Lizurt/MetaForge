@@ -1,11 +1,15 @@
 package com.lizurt.metaforge.service;
 
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.sql.*;
 
 @Service
+@RequiredArgsConstructor
 public class MetaForgeService {
+
+    private final PrimaryKeyFixerService primaryKeyFixerService;
 
     public void ruinDatabase(String dbUrl, String dbUser, String dbPassword) throws SQLException {
         try (Connection connection = DriverManager.getConnection(dbUrl, dbUser, dbPassword)) {
@@ -81,6 +85,6 @@ public class MetaForgeService {
     }
 
     public void fixDatabase(String dbUrl, String dbUser, String dbPassword) {
-
+        primaryKeyFixerService.fixPrimaryKeys(dbUrl, dbUser, dbPassword);
     }
 }
