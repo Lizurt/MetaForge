@@ -1,26 +1,12 @@
 spring:
   datasource:
-    url: jdbc:postgresql://localhost:5432/testdb
-    username: root
-    password: root
+    url: jdbc:postgresql://localhost:5432/MetaForgeTest
+    username: metaforge
+    password: metaforge
     driver-class-name: org.postgresql.Driver
   jpa:
     hibernate:
-      ddl-auto: create-drop
-    database-platform: org.hibernate.dialect.PostgreSQLDialect
-  test:
-    database:
-      replace: any
-metaforge:
-  test:
-    random:
-      seed: 1
-    database:
-      users:
-        amount: 1_000
-      libraries:
-        amount: 1_000
-      visits:
-        amount: 1_000
-
-
+      ddl-auto: none
+  flyway:
+    enabled: true
+    locations: classpath:db/migration

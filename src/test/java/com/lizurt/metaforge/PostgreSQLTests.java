@@ -1,216 +1,99 @@
 package com.lizurt.metaforge;
 
-import com.lizurt.metaforge.service.MetaForgeService;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import org.assertj.core.api.SoftAssertions;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
 
-import java.sql.*;
-import java.time.Instant;
-import java.time.temporal.ChronoUnit;
-import java.util.Random;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @SpringBootTest
-@Slf4j
-@RequiredArgsConstructor(onConstructor = @__(@Autowired))
 public class PostgreSQLTests {
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
-    @Value("${spring.datasource.url}")
-    private String dbUrl;
+    @BeforeAll
+    public void setupDatabase() {
+        ResourceDatabasePopulator populator;
 
-    @Value("${spring.datasource.username}")
-    private String dbUsername;
+        populator = new ResourceDatabasePopulator(new ClassPathResource("sql/clear_schema.sql"));
+        populator.execute(jdbcTemplate.getDataSource());
 
-    @Value("${spring.datasource.password}")
-    private String dbPassword;
+        populator = new ResourceDatabasePopulator(new ClassPathResource("sql/init_original_tables.sql"));
+        populator.execute(jdbcTemplate.getDataSource());
 
-    @Value("${metaforge.test.database.users.amount}")
-    private int usersAmount;
+        populator = new ResourceDatabasePopulator(new ClassPathResource("sql/init_broken_tables.sql"));
+        populator.execute(jdbcTemplate.getDataSource());
 
-    @Value("${metaforge.test.database.libraries.amount}")
-    private int librariesAmount;
-
-    @Value("${metaforge.test.database.visits.amount}")
-    private int visitsAmount;
-
-    @Value("${metaforge.test.random.seed}")
-    private int randomSeed;
-
-    private final MetaForgeService metaForgeService;
+        populator = new ResourceDatabasePopulator(new ClassPathResource("sql/fill_tables.sql"));
+        populator.execute(jdbcTemplate.getDataSource());
+    }
 
     @Test
-    public void populateDatabaseAndTestConstraints() throws Exception {
-        Random random = new Random(randomSeed);
+    public void testDomainsAndConstraints() {
+        SoftAssertions softly = new SoftAssertions();
+        softly.assertThat(getDomainOf("users_broken", "id"))
+                .matches(value -> value.contains("UUID"), "users.id should be UUID");
+        softly.assertThat(getDomainOf("users_broken", "name"))
+                .matches(value -> value.contains("TEXT"), "users.name should be TEXT");
+        softly.assertThat(getDomainOf("users_broken", "birth_date"))
+                .matches(value -> value.contains("DATE"), "users.birth_date should be DATE");
+        softly.assertThat(getDomainOf("users_broken", "email"))
+                .matches(value -> value.contains("TEXT"), "users.email should be TEXT");
 
-        try (Connection connection = DriverManager.getConnection(dbUrl, dbUsername, dbPassword)) {
-            try (Statement statement = connection.createStatement()) {
-                statement.execute("DROP TABLE IF EXISTS visits");
-                statement.execute("DROP TABLE IF EXISTS libraries");
-                statement.execute("DROP TABLE IF EXISTS users");
+        softly.assertThat(getDomainOf("products_broken", "id"))
+                .matches(value -> value.contains("INTEGER"), "products.id should be INTEGER");
+        softly.assertThat(getDomainOf("products_broken", "name"))
+                .matches(value -> value.contains("TEXT"), "products.name should be TEXT");
+        softly.assertThat(getDomainOf("products_broken", "price"))
+                .matches(value -> value.contains("NUMERIC"), "products.price should be NUMERIC");
 
-                statement.execute("CREATE TABLE users (" +
-                        "user_id SERIAL PRIMARY KEY, " +
-                        "age INT, " +
-                        "salary FLOAT, " +
-                        "name TEXT NOT NULL, " +
-                        "surname TEXT NOT NULL, " +
-                        "patronymic TEXT, " +
-                        "login TEXT UNIQUE " +
-                        ")");
+        softly.assertThat(getDomainOf("orders_broken", "id"))
+                .matches(value -> value.contains("TEXT"), "orders.id should be TEXT");
+        softly.assertThat(getDomainOf("orders_broken", "user_id"))
+                .matches(value -> value.contains("UUID"), "orders.user_id should be UUID");
+        softly.assertThat(getDomainOf("orders_broken", "product_id"))
+                .matches(value -> value.contains("INTEGER"), "orders.product_id should be INTEGER");
+        softly.assertThat(getDomainOf("orders_broken", "quantity"))
+                .matches(value -> value.contains("INTEGER"), "orders.quantity should be INTEGER");
+        softly.assertThat(getDomainOf("orders_broken", "order_date"))
+                .matches(value -> value.contains("TIMESTAMP"), "orders.order_date should be TIMESTAMP");
 
-                statement.execute("CREATE TABLE libraries (" +
-                        "library_id SERIAL PRIMARY KEY, " +
-                        "location TEXT NOT NULL " +
-                        ")");
+        softly.assertThat(getConstraintType("users_broken", "users_pkey"))
+                .matches(value -> value.contains("PRIMARY KEY"), "users_pkey should be PRIMARY KEY");
+        softly.assertThat(getConstraintType("products_broken", "products_pkey"))
+                .matches(value -> value.contains("PRIMARY KEY"), "products_pkey should be PRIMARY KEY");
+        softly.assertThat(getConstraintType("orders_broken", "orders_pkey"))
+                .matches(value -> value.contains("PRIMARY KEY"), "orders.pkey should be PRIMARY KEY");
 
-                statement.execute("CREATE TABLE visits (" +
-                        "visit_id SERIAL PRIMARY KEY, " +
-                        "user_id INT, " +
-                        "library_id INT, " +
-                        "visit_date TIMESTAMP, " +
-                        "UNIQUE (user_id, library_id, visit_date), " +
-                        "FOREIGN KEY (user_id) REFERENCES users(user_id), " +
-                        "FOREIGN KEY (library_id) REFERENCES libraries(library_id) " +
-                        ")");
-            }
+        softly.assertThat(getConstraintType("orders_broken", "orders_user_id_fkey"))
+                .matches(value -> value.contains("FOREIGN KEY"), "orders_user_id_fkey should be FOREIGN KEY");
+        softly.assertThat(getConstraintType("orders_broken", "orders_product_id_fkey"))
+                .matches(value -> value.contains("FOREIGN KEY"), "orders_product_id_fkey should be FOREIGN KEY");
 
-            try (PreparedStatement usersStatement =
-                         connection.prepareStatement(
-                                 "INSERT INTO users (age, salary, name, surname, patronymic, login) " +
-                                         "VALUES (?, ?, ?, ?, ?, ?)")) {
-                for (int i = 0; i < usersAmount; i++) {
-                    usersStatement.setInt(1, random.nextInt(100));
-                    usersStatement.setFloat(2, random.nextFloat() * 100000);
-                    usersStatement.setString(3, "John" + i);
-                    usersStatement.setString(4, "Doe" + i);
-                    usersStatement.setString(5, "Patronymic" + i);
-                    usersStatement.setString(6, "johndoe" + i);
-                    usersStatement.addBatch();
-                }
-                usersStatement.executeBatch();
-            }
+        softly.assertAll();
+    }
 
-            try (PreparedStatement librariesStatement =
-                         connection.prepareStatement(
-                                 "INSERT INTO libraries (location) VALUES (?)")) {
-                for (int i = 0; i < librariesAmount; i++) {
-                    librariesStatement.setString(1, "Revolutsii street, " + i);
-                    librariesStatement.addBatch();
-                }
-                librariesStatement.executeBatch();
-            }
+    private String getDomainOf(String table, String column) {
 
-            try (PreparedStatement visitsStatement =
-                         connection.prepareStatement(
-                                 "INSERT INTO visits (user_id, library_id, visit_date) VALUES (?, ?, ?)")) {
-                for (int i = 0; i < visitsAmount; i++) {
-                    visitsStatement.setInt(1, random.nextInt(usersAmount) + 1);
-                    visitsStatement.setInt(2, random.nextInt(librariesAmount) + 1);
-                    visitsStatement.setTimestamp(3, Timestamp.from(Instant.now().plus(i, ChronoUnit.DAYS)));
-                    visitsStatement.addBatch();
-                }
-                visitsStatement.executeBatch();
-            }
+        String sql = "SELECT data_type FROM information_schema.columns WHERE table_name = ? AND column_name = ?";
+        try {
+            return jdbcTemplate.queryForObject(sql, new Object[]{table, column}, String.class).toUpperCase();
+        } catch (Exception e) {
+            return "";
+        }
+    }
 
-            metaForgeService.ruinDatabase(dbUrl, dbUsername, dbPassword);
-            metaForgeService.fixDatabase(dbUrl, dbUsername, dbPassword);
-
-            try (Statement statement = connection.createStatement()) {
-                try (ResultSet rs = statement.executeQuery(
-                        """
-                                SELECT column_name, constraint_type \
-                                FROM information_schema.table_constraints tc \
-                                JOIN information_schema.constraint_column_usage ccu \
-                                ON tc.constraint_name = ccu.constraint_name \
-                                WHERE tc.table_name = 'users'
-                                """
-                )) {
-                    while (rs.next()) {
-                        String columnName = rs.getString("column_name");
-                        String constraintType = rs.getString("constraint_type");
-                        switch (columnName) {
-                            case "user_id":
-                                assertEquals("PRIMARY KEY", constraintType, "users table lost its PRIMARY KEY");
-                                break;
-                            case "name", "surname":
-                                assertEquals("NOT NULL", constraintType, "users table lost its NOT NULL name and surname");
-                                break;
-                            case "login":
-                                assertEquals("UNIQUE", constraintType, "users table lost its ALTERNATIVE KEY (UNIQUE login)");
-                                break;
-                        }
-                    }
-                }
-
-                try (ResultSet rs = statement.executeQuery(
-                        """
-                                SELECT column_name, constraint_type \
-                                FROM information_schema.table_constraints tc \
-                                JOIN information_schema.constraint_column_usage ccu \
-                                ON tc.constraint_name = ccu.constraint_name \
-                                WHERE tc.table_name = 'visits'
-                                """
-                )) {
-                    while (rs.next()) {
-                        String columnName = rs.getString("column_name");
-                        String constraintType = rs.getString("constraint_type");
-                        switch (columnName) {
-                            case "user_id, library_id":
-                                assertEquals("FOREIGN KEY", constraintType, "visits table lost its FOREIGN KEYs");
-                                break;
-                            case "visit_id":
-                                assertEquals("PRIMARY KEY", constraintType, "visits table lost its PRIMARY KEY");
-                                break;
-                        }
-                    }
-                }
-
-                try (ResultSet resultSet = statement.executeQuery(
-                        """
-                                SELECT conname AS constraint_name \
-                                FROM pg_constraint \
-                                WHERE conrelid = 'visits'::regclass \
-                                  AND contype = 'u' \
-                                  AND conkey @> ARRAY[ \
-                                      (SELECT attnum FROM pg_attribute WHERE attrelid = 'visits'::regclass AND attname = 'user_id'), \
-                                      (SELECT attnum FROM pg_attribute WHERE attrelid = 'visits'::regclass AND attname = 'library_id'), \
-                                      (SELECT attnum FROM pg_attribute WHERE attrelid = 'visits'::regclass AND attname = 'visit_date') \
-                                  ];
-                                """
-                )) {
-                    assertTrue(resultSet.next(), "visits table lost its alternative key (UNIQUE of user_id, library_id and date)");
-                }
-
-
-                try (ResultSet rs = statement.executeQuery(
-                        """
-                                SELECT column_name, constraint_type \
-                                FROM information_schema.table_constraints tc \
-                                JOIN information_schema.constraint_column_usage ccu \
-                                ON tc.constraint_name = ccu.constraint_name \
-                                WHERE tc.table_name = 'libraries'
-                                """
-                )) {
-                    while (rs.next()) {
-                        String columnName = rs.getString("column_name");
-                        String constraintType = rs.getString("constraint_type");
-                        switch (columnName) {
-                            case "library_id":
-                                assertEquals("PRIMARY KEY", constraintType, "libraries table lost its PRIMARY KEY");
-                                break;
-                            case "location":
-                                assertEquals("NOT NULL", constraintType, "libraries table lost its NOT NULL location");
-                                break;
-                        }
-                    }
-                }
-            }
+    private String getConstraintType(String table, String constraint) {
+        String sql = "SELECT constraint_type FROM information_schema.table_constraints WHERE table_name = ? AND constraint_name = ?";
+        try {
+            return jdbcTemplate.queryForObject(sql, new Object[]{table, constraint}, String.class).toUpperCase();
+        } catch (Exception e) {
+            return "";
         }
     }
 }
